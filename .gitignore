@@ -1,0 +1,11 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/packages
+bin/
+obj/
+/.vs
+*.user
+*.pubxml
+/src/SendBatchUploadAndMerge/.vs

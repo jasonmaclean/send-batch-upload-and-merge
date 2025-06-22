@@ -1,0 +1,187 @@
+----item----
+version: 1
+id: {4C4F4EED-7701-4DDA-9548-B4ECD78DE93C}
+database: master
+path: /sitecore/system/Modules/PowerShell/Script Library/SitecoreFundamentals/Sitecore Send/Batch Email List Update
+parent: {FAEEAEF1-A5A3-477C-87EF-BC25DB08DFF0}
+name: Batch Email List Update
+master: {00000000-0000-0000-0000-000000000000}
+template: {DD22F1B3-BD87-4DB2-9E7D-F7A496888D43}
+templatekey: PowerShell Script
+
+----field----
+field: {B1A94FF0-6897-47C0-9C51-AA6ACB80B1F0}
+name: Script
+key: script
+content-length: 2750
+
+$assemblyPath = $AppPath + "bin\SitecoreFundamentals.SendBatchUploadAndMerge.dll"
+
+Add-Type -LiteralPath $assemblyPath
+
+$ProgressPreference = 'SilentlyContinue'
+
+# =================================================================
+# Variables for this job
+# =================================================================
+$itemGuid = New-Guid
+$destinationPath = $AppPath + "\App_Data\Integrations\Send\BatchUploads\" + $itemGuid
+
+# =================================================================
+# Receive variables
+# =================================================================
+
+$uploadedFile = Receive-File -Path $destinationPath -Overwrite
+
+$options = @{
+    "Report only"        = "report"
+    "Execute and report" = "execute"
+}
+$props = @{
+    Parameters  = @(
+        @{Name = "selectedOption"; Title = "Please choose an option for this CSV."; Options = $options; }
+    )
+    Title       = "Mode selection"
+    Description = "Please choose."
+    Width       = 300
+    Height      = 300
+    ShowHints   = $true
+}
+Read-Variable @props | out-null
+
+try {
+    $sendTasks = New-Object SitecoreFundamentals.SendBatchUploadAndMerge.Tasks.Send
+
+    $emailLists = $sendTasks.GetEmailListsForSelectionAsync().Result
+    $orderedEmailLists = [ordered]@{}
+    $emailLists.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        $orderedEmailLists[$_.Key] = $_.Value
+    }
+    $props2 = @{
+        Parameters  = @(
+            @{Name = "emailListId"; Title = "Please select which email list to update."; Options = $orderedEmailLists; }
+        )
+        Title       = "Email list selection"
+        Description = "Please choose."
+        Width       = 300
+        Height      = 300
+        ShowHints   = $true
+    }
+    Read-Variable @props2 | out-null
+
+    # =================================================================
+    # Run program
+    # =================================================================
+
+    $result = $sendTasks.BatchEmailListUpdateAsync($uploadedFile, $emailListId, $selectedOption).Result
+}
+finally {
+    if ($SendGetwayObject) {
+        $SendGetwayObject.Dispose()
+    }
+}
+
+# =================================================================
+# Clean up
+# ================================================================= 
+if (Test-Path -Path $destinationPath -PathType Container) {
+  Remove-Item -Path $destinationPath -Recurse -Force -Confirm:$false
+}
+
+Write-Host $result.Item2
+
+if ($result.Item1) {
+    Show-Alert -Title "The operation is complete. Please click View Script Results for more information."
+}
+else {
+    Show-Alert -Title "There are errors in the upload. Please click View Script Results for more information."
+}
+
+
+----version----
+language: en
+version: 1
+revision: 8f7d2e28-016b-4e52-8638-1ccbb413b7a1
+
+----field----
+field: {52807595-0F8F-4B20-8D2A-CB71D28C6103}
+name: __Owner
+key: __owner
+content-length: 14
+
+sitecore\admin
+----field----
+field: {25BED78C-4957-4165-998A-CA1B52F67497}
+name: __Created
+key: __created
+content-length: 16
+
+20250527T200915Z
+----field----
+field: {8CDC337E-A112-42FB-BBB4-4143751E123F}
+name: __Revision
+key: __revision
+content-length: 36
+
+8f7d2e28-016b-4e52-8638-1ccbb413b7a1
+----field----
+field: {D9CF14B1-FA16-4BA6-9288-E8A174D4D522}
+name: __Updated
+key: __updated
+content-length: 16
+
+20250529T143341Z
+----field----
+field: {BADD9CF9-53E0-4D0C-BCC0-2D784C282F6A}
+name: __Updated by
+key: __updated by
+content-length: 14
+
+sitecore\admin
+----version----
+language: en
+version: 2
+revision: c829cec0-5ae6-43dd-b003-83f928b2bc24
+
+----field----
+field: {C8F93AFE-BFD4-4E8F-9C61-152559854661}
+name: __Valid from
+key: __valid from
+content-length: 16
+
+20250529T143758Z
+----field----
+field: {52807595-0F8F-4B20-8D2A-CB71D28C6103}
+name: __Owner
+key: __owner
+content-length: 14
+
+sitecore\admin
+----field----
+field: {25BED78C-4957-4165-998A-CA1B52F67497}
+name: __Created
+key: __created
+content-length: 16
+
+20250529T143758Z
+----field----
+field: {8CDC337E-A112-42FB-BBB4-4143751E123F}
+name: __Revision
+key: __revision
+content-length: 36
+
+c829cec0-5ae6-43dd-b003-83f928b2bc24
+----field----
+field: {D9CF14B1-FA16-4BA6-9288-E8A174D4D522}
+name: __Updated
+key: __updated
+content-length: 16
+
+20250622T185220Z
+----field----
+field: {BADD9CF9-53E0-4D0C-BCC0-2D784C282F6A}
+name: __Updated by
+key: __updated by
+content-length: 14
+
+sitecore\admin

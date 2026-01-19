@@ -49,9 +49,10 @@
     <PackageAuthor>Jason MacLean</PackageAuthor>
     <PackagePublisher>SitecoreFundamentals.com</PackagePublisher>
     <PackageVersion>1.0</PackageVersion>
-    <PackageReadme>Add /sitecore/templates/Modules/PublishHistory/_LastPublished to any template you want to record the last published date and who published it.</PackageReadme>
+    <PackageReadme>
+    </PackageReadme>
     <SitecoreAssemblyPath />
-    <GeneratePackage>True</GeneratePackage>
+    <GeneratePackage>False</GeneratePackage>
     <SeperateFilesAndItems>False</SeperateFilesAndItems>
     <PackageExcludeCode>False</PackageExcludeCode>
     <AddDateTimeToPackageName>True</AddDateTimeToPackageName>

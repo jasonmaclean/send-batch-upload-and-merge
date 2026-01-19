@@ -97,15 +97,18 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Gateways
             return mailingLists;
         }
 
-        public async Task<bool> AddMultipleSubscribersAsync(string mailingListID, List<AddToListSubscriber> subscribers)
+        public async Task<ResponseBase> AddMultipleSubscribersAsync(string mailingListID, List<AddToListSubscriber> subscribers)
             => await AddMultipleSubscribersAsync(mailingListID, new AddMultipleSubscribers { Subscribers = subscribers });
 
-        public async Task<bool> AddMultipleSubscribersAsync(string mailingListID, AddMultipleSubscribers addMultipleSubscribers)
+        public async Task<ResponseBase> AddMultipleSubscribersAsync(string mailingListID, AddMultipleSubscribers addMultipleSubscribers)
         {
             if (addMultipleSubscribers == null
                 || addMultipleSubscribers.Subscribers == null
                 || addMultipleSubscribers.Subscribers.Count == 0)
-                return false;
+                return new ResponseBase()
+                {
+                    Code = 1
+                };
 
             var endpointFormatter = new GatewayUtility.EndpointFormatter(_httpClient, GlobalConfigItem, Templates.IntegrationSettings.Send.Fields.AddMultipleSubscribers);
 
@@ -127,10 +130,32 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Gateways
             if (!response.IsSuccessStatusCode)
             {
                 Log.Error($"Failed to post subscribers. Status code: {response.StatusCode}, Reason: {response.ReasonPhrase}", this);
-                return false;
+                return new ResponseBase()
+                {
+                    Code = 1
+                };
             }
 
-            return true;
+            var jsonSerializerSettings = new JsonSerializerSettings
+            {
+                MissingMemberHandling = MissingMemberHandling.Ignore
+            };
+
+            ResponseBase result = null;
+
+            try
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                result = JsonConvert.DeserializeObject<ResponseBase>(responseContent, jsonSerializerSettings);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error deserializing subscribers.", ex, this);
+                throw;
+            }
+
+            return result;
         }
 
         public async Task<MailingListSubscribers> GetAllSubscribersOfMailingListAsync(string mailingListID, MailingListMemberStatus status)

@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using static SitecoreFundamentals.SendBatchUploadAndMerge.Constants.Enums;
@@ -48,10 +49,15 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
         {
             var message = "";
             var sb = new StringBuilder();
-            var added = 0;
-            var skipped = 0;
-            var skippedUnsubscribed = 0;
-            var updated = 0;
+
+            var skippedUnsubscribedInCsv = 0;
+            var skippedUnsubscribedInSendList = 0;
+            var assumeActive = 0;
+            var suspicious = 0;
+            var unsubscibed = 0;
+            var suppressed = 0;
+            var updatedEmails = new List<string>();
+            var addedEmails = new List<string>();
 
             if (fileLocation == "cancel")
             {
@@ -168,7 +174,7 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
 
                         if (columnType.IsStatus && columnValue.ToLower() != "active")
                         {
-                            skipped++;
+                            skippedUnsubscribedInCsv++;
                             continue;
                         }
                         if (columnType.IsStandard)
@@ -221,7 +227,7 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
                             subscriber.Tags = subscriber.Tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                         }
 
-                        updated++;
+                        updatedEmails.Add(subscriber.Email);
                     }
                     else
                     {
@@ -229,16 +235,17 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
 
                         if (unsubscribedUser != null)
                         {
-                            skippedUnsubscribed++;
+                            skippedUnsubscribedInSendList++;
                         }
                         else
                         {
-                            added++;
+                            addedEmails.Add(subscriber.Email);
                         }
                     }
                 }
-
-                var resultCounts = $"Added {added}, Updated {updated}, Skipped (unsubscribed): {skippedUnsubscribed}, Skipped (not active) {skipped}.";
+                
+                var wasWere = assumeActive == 1 ? "was" : "were";
+                var assumedActiveMessage = $"{assumeActive} of the CSV records had no status and {wasWere} assumed Active.";
 
                 if (mode != "execute")
                 {
@@ -246,10 +253,11 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
                     sb.AppendLine(message);
                     Log.Info(message, this);
 
-                    sb.AppendLine(resultCounts);
-                    Log.Info(resultCounts, this);
+                    message = $"Added {addedEmails.Count}, Updated {updatedEmails.Count}, Skipped (unsubscribed in destination list): {skippedUnsubscribedInSendList}. {assumedActiveMessage}";
+                    sb.AppendLine(message);
+                    Log.Info(message, this);
 
-                    message = $"Program is in reporting mode. Exiting.";
+                    message = $"Counts may change at execution due to suppression or suspicious emails (you will be notified).";
                     sb.AppendLine(message);
                     Log.Info(message, this);
 
@@ -281,17 +289,61 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
                 for (int j = 0; j < numberOfCalls; j++)
                 {
                     var batchSubscribers = csvSubscribers.Skip(j * maxRecordsPerCall).Take(maxRecordsPerCall).ToList();
-                    if (await sendGateway.AddMultipleSubscribersAsync(mailingListID, batchSubscribers))
+                    var result = await sendGateway.AddMultipleSubscribersAsync(mailingListID, batchSubscribers);
+                    if (result.Code == 0)
                     {
+                        if (!string.IsNullOrWhiteSpace(result.Error))
+                        {
+                            try
+                            {
+                                var emailMatches = Regex.Matches(result.Error, @"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}");
+                                var emailsInError = emailMatches.Cast<Match>().Select(m => m.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+                                foreach (var email in emailsInError)
+                                {
+                                    Log.Info($"Removing {email} from totals counts.", this);
+
+                                    addedEmails.RemoveAll(e => e.Equals(email, StringComparison.OrdinalIgnoreCase));
+                                    updatedEmails.RemoveAll(e => e.Equals(email, StringComparison.OrdinalIgnoreCase));
+                                }
+
+                                var errorMessages = result.Error.ToLowerInvariant().Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+                                foreach (var errorMessage in errorMessages)
+                                {
+                                    if (errorMessage.Contains("suspicious"))
+                                    {
+                                        suspicious += GetLeadingInt(errorMessage);
+                                    }
+                                    else if (errorMessage.Contains("unsubscribed"))
+                                    {
+                                        unsubscibed += GetLeadingInt(errorMessage);
+                                    }
+                                    else if (errorMessage.Contains("suppresion"))
+                                    {
+                                        suppressed += GetLeadingInt(errorMessage);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Error($"Error processing API error message. This can be ignored but should be fixed. ({ex.Message})", this);
+                            }
+                        }
+
                         message = $"Successfully processed {batchSubscribers.Count} subscribers in batch {j + 1} of {numberOfCalls}.";
                         sb.AppendLine(message);
                         Log.Info(message, this);
                     }
                     else
                     {
-                        message = $"Failed to update mailing list due to error at Send API in batch {j + 1}.";
+                        message = $"Failed to update mailing list due to error at Send API in batch {j + 1}. See logs for more details.";
                         sb.AppendLine(message);
                         Log.Info(message, this);
+
+                        message = $"Send code {result.Code}. Send response: {result.Error}";
+                        Log.Info(message, this);
+
                         return new Tuple<bool, string>(false, sb.ToString());
                     }
 
@@ -309,8 +361,36 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
                 sb.AppendLine(message);
                 Log.Info(message, this);
 
+                var resultCounts = $"Added {addedEmails.Count}, Updated {updatedEmails.Count}, Skipped (unsubscribed in destination list): {skippedUnsubscribedInSendList}. {assumedActiveMessage}.";
                 sb.AppendLine(resultCounts);
                 Log.Info(resultCounts, this);
+
+                if (suspicious > 0)
+                {
+                    message = $"{suspicious} subscribers were found as suspicious and were not processed.";
+                    sb.AppendLine(message);
+                    Log.Info(message, this);
+                }
+
+                if (unsubscibed > 0)
+                {
+                    message = $"{unsubscibed} subscribers were found as unsubscribed in another list and were not processed.";
+                    sb.AppendLine(message);
+                    Log.Info(message, this);
+                }
+
+                if (suppressed > 0)
+                {
+                    message = $"{suppressed} subscribers were found as suppressed and were not processed.";
+                    sb.AppendLine(message);
+                    Log.Info(message, this);
+                }
+
+                if (suspicious > 0 || unsubscibed > 0 || suppressed > 0)
+                {
+                    message = $"A list of the subscribers removed from the CSV can be found in the logs.";
+                    sb.AppendLine(message);
+                }
             }
 
             return new Tuple<bool, string>(true, sb.ToString());
@@ -349,6 +429,25 @@ namespace SitecoreFundamentals.SendBatchUploadAndMerge.Tasks
             }
 
             return table;
+        }
+
+        private int GetLeadingInt(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return 0;
+
+            try
+            {
+                var match = Regex.Match(message, @"^\s*(\d+)");
+                if (match.Success && int.TryParse(match.Groups[1].Value, out int value))
+                    return value;
+            }
+            catch
+            {
+                // Ignore parsing errors
+            }
+
+            return 0;
         }
     }
 }
